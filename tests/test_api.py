@@ -293,6 +293,29 @@ def test_legacy_migration(tmp_path, runner):
         assert c.get("/api/status").json()["config"]["name"] == "japan"  # autostarted
 
 
+@pytest.mark.parametrize("value, expected", [
+    ("185.34.0.0/16", ["185.34.0.0/16"]),  # form shown in docker-compose.yml
+    ("185.34.0.0/16, 10.10.0.0/16", ["185.34.0.0/16", "10.10.0.0/16"]),
+    ('["185.34.0.0/16", "10.10.0.0/16"]', ["185.34.0.0/16", "10.10.0.0/16"]),
+])
+def test_routed_ranges_from_env(tmp_path, monkeypatch, value, expected):
+    monkeypatch.setenv("LOBBYSHIFT_CONFIG_FILE", str(tmp_path / "missing.yaml"))
+    monkeypatch.setenv("LOBBYSHIFT_ROUTED_RANGES", value)
+    assert Settings().routed_ranges == expected
+
+
+def test_edit_keeps_hidden_preshared_key(authed, runner):
+    from .conftest import make_key
+
+    psk = make_key()
+    upload(authed, text=proton_conf().replace("Endpoint =", f"PresharedKey = {psk}\nEndpoint ="))
+    text = authed.get("/api/configs/MX-12").json()["text"]
+    assert "PresharedKey = [HIDDEN]" in text
+    assert authed.put("/api/configs/MX-12/text", json={"text": text}).status_code == 200
+    authed.post("/api/tunnel/connect/MX-12")
+    assert f"PresharedKey = {psk}" in runner.inputs[("wg", "setconf", "lobbyshift")]
+
+
 def test_settings_yaml_legacy_keys(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
     path.write_text("interface: enp1s0\nallowed_ips:\n  - 185.34.0.0/16\n  - 10.10.0.0/16\n"

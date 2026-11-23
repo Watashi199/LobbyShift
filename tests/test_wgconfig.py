@@ -55,6 +55,16 @@ def test_hidden_private_key_is_restored_on_edit():
     assert edited.private_key == original.private_key
 
 
+def test_hidden_preshared_key_is_restored_on_edit():
+    text = proton_conf().replace("Endpoint =", f"PresharedKey = {make_key()}\nEndpoint =")
+    original = parse(text)
+    redacted = render(original, hide_private_key=True)
+    assert "PresharedKey = [HIDDEN]" in redacted
+    edited = parse(redacted, existing_private_key=original.private_key,
+                   existing_preshared_key=original.preshared_key)
+    assert edited.preshared_key == original.preshared_key
+
+
 def test_hidden_key_without_existing_key_is_rejected():
     with pytest.raises(ConfigError, match="hidden"):
         parse(render(parse(proton_conf()), hide_private_key=True))

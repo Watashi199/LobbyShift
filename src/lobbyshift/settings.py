@@ -7,17 +7,19 @@ live in the SQLite store, not here.
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
 from pydantic import field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
+    NoDecode,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
@@ -72,7 +74,9 @@ class Settings(BaseSettings):
     wg_interface: str = "lobbyshift"
     routing_table: int = 51820
     rule_priority: int = 5210
-    routed_ranges: list[str] = DEFAULT_ROUTED.copy()
+    # NoDecode: pydantic-settings would otherwise JSON-decode the env value and
+    # reject the documented plain form LOBBYSHIFT_ROUTED_RANGES="185.34.0.0/16".
+    routed_ranges: Annotated[list[str], NoDecode] = DEFAULT_ROUTED.copy()
 
     # Web
     web_host: str = "0.0.0.0"  # noqa: S104 - a LAN gateway UI must listen on the LAN
@@ -101,7 +105,9 @@ class Settings(BaseSettings):
     @classmethod
     def _ranges(cls, v: Any) -> list[str]:
         if isinstance(v, str):
-            v = [item for item in re.split(r"[,\s]+", v) if item]
+            text = v.strip()
+            # Accept a JSON array as well as "a, b" / "a b".
+            v = json.loads(text) if text.startswith("[") else [i for i in re.split(r"[,\s]+", text) if i]
         nets = [str(ipaddress.IPv4Network(item, strict=False)) for item in v]
         if not nets:
             raise ValueError("routed_ranges must not be empty")

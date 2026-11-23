@@ -32,7 +32,6 @@ from .core.wgconfig import (
     parse,
     render,
     sanitize_name,
-    with_hidden_preshared,
 )
 from .network import LanInfo, NetworkError, detect_lan, read_sysctl, write_sysctl
 from .runner import CommandError, Runner
@@ -322,10 +321,10 @@ class LobbyShift:
         row = self._row(name)
         existing = parse(row["body"])
         try:
-            cfg = parse(text, existing_private_key=existing.private_key)
+            cfg = parse(text, existing_private_key=existing.private_key,
+                        existing_preshared_key=existing.preshared_key)
         except ConfigError as e:
             raise ServiceError(str(e)) from e
-        cfg = with_hidden_preshared(cfg, existing)
         provider, country, meta = await self._describe(cfg)
         self.store.update_config(name, body=render(cfg), provider=provider,
                                  country=country, meta=meta, latency_ms=None, latency_at=None)
