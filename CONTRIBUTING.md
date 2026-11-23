@@ -23,7 +23,8 @@ Thanks for your interest in contributing! 🎮
 3. Make your changes, with tests
 4. Run `ruff check src tests scripts` and `pytest`
 5. Commit with clear messages
-6. Push and create a PR (CI runs lint, tests on Python 3.11–3.13, shellcheck and a Docker build)
+6. Push and create a PR (CI runs lint, tests on Python 3.11–3.14, shellcheck, and a Docker build with a
+   real-kernel integration test: `scripts/integration_check.py`)
 
 ## Development Setup
 

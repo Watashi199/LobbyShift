@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # ---- build wheels (compilers stay in this stage) --------------------------
-FROM python:3.12-slim-bookworm AS build
+FROM python:3.13-slim-trixie AS build
+ENV PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
@@ -11,7 +12,8 @@ COPY src ./src
 RUN pip wheel --no-cache-dir --wheel-dir /wheels .
 
 # ---- runtime ---------------------------------------------------------------
-FROM python:3.12-slim-bookworm
+FROM python:3.13-slim-trixie
+ENV PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1
 LABEL org.opencontainers.image.title="LobbyShift" \
       org.opencontainers.image.description="Split-tunnel gateway routing console matchmaking through WireGuard" \
       org.opencontainers.image.source="https://github.com/Watashi199/LobbyShift" \

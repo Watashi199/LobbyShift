@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # LobbyShift installer (native install with systemd).
-# Supports Debian 12+, Ubuntu 22.04+, Raspberry Pi OS (Bookworm). Python >= 3.11.
+# Supports Debian 12 (Bookworm) and 13 (Trixie), Ubuntu 22.04+, Raspberry Pi OS Bookworm or Trixie. Python >= 3.11.
 # Prefer Docker? See docker-compose.yml.
 #
 # Re-running this script upgrades an existing install (v1 data is migrated).
