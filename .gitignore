@@ -41,3 +41,7 @@ htmlcov/
 # Local development
 .env
 .env.local
+
+# LobbyShift dev server state
+.devdata/
+.ruff_cache/

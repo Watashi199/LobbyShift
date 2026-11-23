@@ -1,0 +1,22 @@
+# LobbyShift static configuration (/etc/lobbyshift/config.yaml)
+# Every key can also be set with an environment variable: LOBBYSHIFT_<KEY>.
+# Runtime preferences (autostart, kill switch, devices) are set in the web UI.
+
+# LAN side. Leave empty to auto-detect from the default route.
+lan_interface: ""
+lan_subnet: ""
+
+# Destination ranges sent through the VPN (CoD matchmaking).
+routed_ranges:
+  - 185.34.0.0/16
+
+# Web interface
+web_host: 0.0.0.0
+web_port: 8080
+
+# Advanced
+# wg_interface: lobbyshift
+# routing_table: 51820
+# rule_priority: 5210
+# log_level: INFO
+# geoip_auto_update: true

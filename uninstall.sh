@@ -1,181 +1,69 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# LobbyShift uninstaller (native install). Docker users: docker compose down -v
+#
+#   sudo ./uninstall.sh           remove the app, keep VPN configs and settings
+#   sudo ./uninstall.sh --purge   remove everything, including configs
 
-# LobbyShift Uninstaller
-# Completely removes LobbyShift installation
+set -euo pipefail
 
-set -e
+PURGE=false
+[[ "${1:-}" == "--purge" ]] && PURGE=true
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+WG_IF=lobbyshift
+TABLE=51820
+PREF=5210
 
-print_banner() {
-    echo -e "${RED}"
-    echo "╔═══════════════════════════════════════╗"
-    echo "║        LobbyShift Uninstaller         ║"
-    echo "╚═══════════════════════════════════════╝"
-    echo -e "${NC}"
-}
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 
-log_info() {
-    echo -e "${GREEN}[✓]${NC} $1"
-}
+[[ $EUID -eq 0 ]] || { echo -e "${RED}[ERROR]${NC} Run as root (sudo)"; exit 1; }
 
-log_warn() {
-    echo -e "${YELLOW}[!]${NC} $1"
-}
+echo -e "${YELLOW}This removes the LobbyShift service, tunnel, firewall rules and program files.${NC}"
+$PURGE && echo -e "${RED}--purge: VPN configs, settings and history are deleted too.${NC}"
+read -r -p "Continue? (y/N): " answer
+[[ "$answer" =~ ^[yY]$ ]] || { echo "Cancelled."; exit 0; }
 
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}[ERROR]${NC} This script must be run as root (use sudo)"
-        exit 1
-    fi
-}
+# Service
+systemctl disable --now lobbyshift 2>/dev/null || true
+rm -f /etc/systemd/system/lobbyshift.service
+systemctl daemon-reload
+ok "Service removed"
 
-confirm_uninstall() {
-    echo ""
-    echo -e "${YELLOW}This will completely remove LobbyShift including:${NC}"
-    echo "  - Service and systemd files"
-    echo "  - All configurations"
-    echo "  - All VPN configs"
-    echo "  - iptables rules"
-    echo "  - Log files"
-    echo "  - User account"
-    echo ""
-    read -p "Are you sure? (y/N): " confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        echo "Uninstall cancelled."
-        exit 0
-    fi
-}
+# Tunnel and policy routing
+while ip rule del pref "$PREF" 2>/dev/null; do :; done
+ip route flush table "$TABLE" 2>/dev/null || true
+ip link del dev "$WG_IF" 2>/dev/null || true
+wg-quick down lobbyshift 2>/dev/null || true   # v1
+rm -f /etc/wireguard/lobbyshift.conf
+ok "Tunnel removed"
 
-stop_services() {
-    log_info "Stopping services..."
-    
-    # Stop systemd service
-    systemctl stop lobbyshift 2>/dev/null || true
-    systemctl disable lobbyshift 2>/dev/null || true
-    
-    # Stop WireGuard interface
-    wg-quick down lobbyshift 2>/dev/null || true
-    ip link delete lobbyshift 2>/dev/null || true
-}
-
-remove_systemd() {
-    log_info "Removing systemd service..."
-    
-    rm -f /etc/systemd/system/lobbyshift.service
-    systemctl daemon-reload
-}
-
-remove_iptables() {
-    log_info "Removing iptables rules..."
-    
-    # Remove NAT rules
-    iptables -t nat -S 2>/dev/null | grep "lobbyshift" | while read rule; do
-        iptables -t nat $(echo $rule | sed 's/-A/-D/') 2>/dev/null || true
+# Firewall
+nft delete table inet lobbyshift 2>/dev/null || true
+for bin in iptables iptables-legacy; do
+    command -v "$bin" >/dev/null || continue
+    "$bin" -S DOCKER-USER 2>/dev/null | grep -- '--comment lobbyshift' | sed 's/^-A/-D/' \
+        | while read -r rule; do eval "$bin -w $rule" 2>/dev/null || true; done
+    for table in nat filter; do   # v1 rules
+        "$bin" -t "$table" -S 2>/dev/null | grep -- "lobbyshift-" | sed 's/^-A/-D/' \
+            | while read -r rule; do eval "$bin -t $table $rule" 2>/dev/null || true; done
     done
-    
-    # Remove FORWARD rules
-    iptables -S 2>/dev/null | grep "lobbyshift" | while read rule; do
-        iptables $(echo $rule | sed 's/-A/-D/') 2>/dev/null || true
-    done
-    
-    # Save iptables
-    netfilter-persistent save 2>/dev/null || true
-}
+done
+if command -v netfilter-persistent >/dev/null; then
+    netfilter-persistent save >/dev/null 2>&1 || true
+fi
+ok "Firewall rules removed"
 
-remove_files() {
-    log_info "Removing installation files..."
-    
-    # Main installation
-    rm -rf /opt/lobbyshift
-    
-    # Configuration
-    rm -rf /etc/lobbyshift
-    
-    # Logs
-    rm -rf /var/log/lobbyshift
-    
-    # WireGuard configs
-    rm -f /etc/wireguard/wg-lobbyshift*.conf
-    rm -f /etc/wireguard/lobbyshift.conf
-    
-    # CLI
-    rm -f /usr/local/bin/lobbyshift
-}
-
-remove_user() {
-    log_info "Removing service user..."
-    
+# Files
+rm -rf /opt/lobbyshift
+rm -f /usr/local/bin/lobbyshift /etc/modules-load.d/lobbyshift.conf /etc/sysctl.d/99-lobbyshift.conf
+warn "IP forwarding stays enabled until reboot (other services may rely on it)"
+if $PURGE; then
+    rm -rf /var/lib/lobbyshift /etc/lobbyshift /var/log/lobbyshift
     userdel lobbyshift 2>/dev/null || true
-}
+    ok "Configs, settings and service user removed"
+else
+    ok "Kept /var/lib/lobbyshift and /etc/lobbyshift (use --purge to delete them)"
+fi
 
-verify_removal() {
-    echo ""
-    echo -e "${BLUE}Verification:${NC}"
-    
-    # Check each component
-    if [ -d "/opt/lobbyshift" ]; then
-        log_warn "/opt/lobbyshift still exists"
-    else
-        log_info "/opt/lobbyshift removed"
-    fi
-    
-    if [ -d "/etc/lobbyshift" ]; then
-        log_warn "/etc/lobbyshift still exists"
-    else
-        log_info "/etc/lobbyshift removed"
-    fi
-    
-    if id "lobbyshift" &>/dev/null; then
-        log_warn "User lobbyshift still exists"
-    else
-        log_info "User lobbyshift removed"
-    fi
-    
-    if iptables -t nat -L -n 2>/dev/null | grep -q "lobbyshift"; then
-        log_warn "Some iptables rules still exist"
-    else
-        log_info "iptables rules removed"
-    fi
-    
-    if systemctl is-enabled lobbyshift &>/dev/null; then
-        log_warn "Service still enabled"
-    else
-        log_info "Service disabled"
-    fi
-}
-
-print_success() {
-    echo ""
-    echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║     Uninstall Complete! 🧹            ║${NC}"
-    echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
-    echo ""
-    echo "LobbyShift has been completely removed."
-    echo ""
-    echo "To reinstall:"
-    echo "  cd ~/LobbyShift"
-    echo "  sudo ./install.sh"
-    echo ""
-}
-
-# Main
-main() {
-    print_banner
-    check_root
-    confirm_uninstall
-    stop_services
-    remove_systemd
-    remove_iptables
-    remove_files
-    remove_user
-    verify_removal
-    print_success
-}
-
-main "$@"
+echo -e "\n${GREEN}LobbyShift has been uninstalled.${NC}"

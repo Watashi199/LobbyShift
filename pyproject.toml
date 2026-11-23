@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lobbyshift"
+version = "2.0.0"
+description = "Self-hosted split-tunnel gateway that routes only CoD matchmaking traffic through a WireGuard VPN"
+readme = "README.md"
+license = "CC-BY-NC-4.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.18",
+    "pydantic-settings>=2.4.0",
+    "pyyaml>=6.0.1",
+    "maxminddb>=2.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+lobbyshift = "lobbyshift.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lobbyshift"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "SIM", "RUF"]
+ignore = [
+    "S603",  # subprocess without shell: all commands are built from validated argv lists
+    "S607",  # partial executable path: ip/wg/nft are resolved from PATH on purpose
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+"scripts/**" = ["S106"]
