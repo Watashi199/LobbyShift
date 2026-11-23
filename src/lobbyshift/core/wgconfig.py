@@ -14,7 +14,7 @@ import base64
 import binascii
 import ipaddress
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 HIDDEN = "[HIDDEN]"
 
@@ -119,11 +119,13 @@ def _split_list(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def parse(text: str, *, existing_private_key: str | None = None) -> WgConfig:
+def parse(text: str, *, existing_private_key: str | None = None,
+          existing_preshared_key: str | None = None) -> WgConfig:
     """Parse a wg-quick style config.
 
-    ``existing_private_key`` lets an edited config keep its key when the user
-    saves the redacted text (``PrivateKey = [HIDDEN]``) shown by the UI.
+    ``existing_private_key`` / ``existing_preshared_key`` let an edited config
+    keep its secrets when the user saves the redacted text (``[HIDDEN]``)
+    shown by the UI.
     """
     section: str | None = None
     seen_interface = False
@@ -219,6 +221,10 @@ def parse(text: str, *, existing_private_key: str | None = None) -> WgConfig:
     endpoint = parse_endpoint(peer["endpoint"])
 
     preshared = peer.get("presharedkey") or None
+    if preshared == HIDDEN:
+        if not existing_preshared_key:
+            raise ConfigError("PresharedKey is hidden; paste the real key")
+        preshared = existing_preshared_key
     if preshared:
         _check_key(preshared, "PresharedKey")
 
@@ -284,13 +290,6 @@ def render(cfg: WgConfig, *, hide_private_key: bool = False) -> str:
     if cfg.persistent_keepalive:
         lines.append(f"PersistentKeepalive = {cfg.persistent_keepalive}")
     return "\n".join(lines) + "\n"
-
-
-def with_hidden_preshared(cfg: WgConfig, existing: WgConfig | None) -> WgConfig:
-    """Restore a PresharedKey that was redacted in the edit UI."""
-    if existing and cfg.preshared_key == HIDDEN:
-        return replace(cfg, preshared_key=existing.preshared_key)
-    return cfg
 
 
 def sanitize_name(name: str) -> str:
