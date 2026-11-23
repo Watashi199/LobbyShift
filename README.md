@@ -52,14 +52,20 @@ LobbyShift is a **self-hosted tactical VPN gateway** designed to intercept and r
 | SYSTEM | CAPABILITY |
 |--------|------------|
 | 🌍 **Region Switching** | Deploy to any VPN node with one click |
-| 🎯 **Split Tunneling** | Only matchmaking traffic (185.34.0.0/16) is rerouted |
+| 🎯 **Split Tunneling** | Only matchmaking traffic (185.34.0.0/16, configurable) is rerouted |
 | ⚡ **Low Latency** | Game traffic stays direct – zero impact on ping |
+| 📶 **Latency Scan** | Measure the ping of every region before deploying |
+| 🛡️ **Proton VPN Intel** | Server, Secure Core and NAT settings read from your Proton configs, with tuning advice |
+| 🎮 **Per-Device Routing** | Choose which consoles use the VPN (or the whole LAN) |
+| 🚫 **Kill Switch** | Optional: block matchmaking instead of leaking it direct when the VPN drops |
+| 🔁 **Watchdog** | Detects a dead tunnel and reconnects automatically |
 | 🖥️ **Command Center** | Military-grade web interface with timezone intel |
 | ⭐ **Quick Deploy** | Pin favorite regions for rapid switching |
 | 📜 **Operation Log** | Track all connection history |
-| 🌐 **Auto Detection** | GeoIP identifies VPN server location with flags |
-| 🎮 **Multi-Platform** | PS5, Xbox Series X|S, PC compatible |
-| 🔒 **OPSEC** | Self-hosted, no data exfiltration |
+| 🌐 **Offline GeoIP** | Country flags from a local database: no lookups sent to third parties |
+| 🕹️ **Multi-Platform** | PS5, Xbox Series X\|S, PC compatible |
+| 🔒 **OPSEC** | Password-protected UI, no root process, configs can't run commands |
+| 🐳 **Docker or Native** | `docker compose up -d` or the classic installer |
 | 🏷️ **Custom Names** | Rename regions (e.g. "Bot Lobbies" instead of "mx-free-47") |
 | 🚀 **Autostart** | Auto-connect to preferred region on boot |
 
@@ -116,6 +122,22 @@ LobbyShift is a **self-hosted tactical VPN gateway** designed to intercept and r
 4. Matchmaking server sees VPN location → Alternative region lobbies
 5. Game server connection → Direct route → Minimal latency
 
+<details>
+<summary>▶ UNDER THE HOOD</summary>
+
+- The tunnel is built directly with `ip link` + `wg setconf`, **not** `wg-quick`: only
+  cryptographic keys are loaded from your config, so `PostUp`/`PreUp` lines (which would run
+  shell commands) and `DNS` are ignored.
+- **Policy routing**: matchmaking ranges live in a dedicated routing table (`51820`), selected by
+  an `ip rule` matching your consoles' source address. Everything else falls through to the main
+  table and goes out directly. The gateway host's own traffic is never affected.
+- **nftables**: one `inet lobbyshift` table (NAT, MSS clamping, optional kill switch), replaced
+  atomically on every change.
+- The service runs as an unprivileged user with only `CAP_NET_ADMIN` and `CAP_NET_RAW`.
+- Restarting the service (or upgrading) keeps the tunnel up: consoles are not disconnected.
+
+</details>
+
 ---
 
 ## 📋 SYSTEM REQUIREMENTS
@@ -126,7 +148,9 @@ LobbyShift is a **self-hosted tactical VPN gateway** designed to intercept and r
 - Minimum 1GB RAM
 
 **SOFTWARE:**
-- Ubuntu 20.04+ / Debian 11+ / Raspberry Pi OS
+- Native install: Debian 12+ / Ubuntu 22.04+ / Raspberry Pi OS Bookworm (Python 3.11+)
+- Or any Linux with Docker (amd64, arm64, armv7)
+- Kernel with WireGuard (5.6+, standard on all of the above)
 - WireGuard-compatible VPN subscription
 
 **SUPPORTED VPN PROVIDERS:**
@@ -161,7 +185,7 @@ LobbyShift is a **self-hosted tactical VPN gateway** designed to intercept and r
 
 ## 🚀 DEPLOYMENT
 
-### Quick Deploy (Recommended)
+### Option A: Native Install (Recommended for Raspberry Pi)
 
 ```bash
 # Clone repository
@@ -169,60 +193,50 @@ git clone https://github.com/Smokimcpot/LobbyShift.git
 cd LobbyShift
 
 # Execute deployment
-chmod +x install.sh
 sudo ./install.sh
 ```
 
+The installer prints the web address and a generated **admin password** at the end.
+
 **DEPLOYMENT CHECKLIST:**
-- ✅ WireGuard installation
-- ✅ Python environment setup
-- ✅ Network configuration (iptables)
-- ✅ Systemd service creation
-- ✅ Web interface deployment
+- ✅ WireGuard tools, nftables, Python environment
+- ✅ IP forwarding + WireGuard module on boot
+- ✅ Hardened systemd service running as the unprivileged `lobbyshift` user
+- ✅ `lobbyshift` CLI
+- ✅ **Upgrading from v1?** Just run it again: your configs, custom names, favorites, history
+  and autostart are migrated automatically, and the old iptables rules are removed.
 
-### Manual Deployment
-
-<details>
-<summary>▶ EXPAND MANUAL INSTRUCTIONS</summary>
+### Option B: Docker
 
 ```bash
-# Install dependencies
-sudo apt update
-sudo apt install -y wireguard wireguard-tools python3 python3-pip python3-venv iptables iptables-persistent
+# Host prerequisites (once)
+echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-lobbyshift.conf && sudo sysctl --system
+echo wireguard | sudo tee /etc/modules-load.d/lobbyshift.conf && sudo modprobe wireguard
 
-# Create directories
-sudo mkdir -p /opt/lobbyshift
-sudo mkdir -p /etc/lobbyshift/configs
-
-# Clone and deploy
-git clone https://github.com/Smokimcpot/LobbyShift.git
-cd LobbyShift
-sudo cp -r * /opt/lobbyshift/
-
-# Python environment
-cd /opt/lobbyshift
-sudo python3 -m venv venv
-sudo ./venv/bin/pip install -r requirements.txt
-
-# Enable IP forwarding
-echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-lobbyshift.conf
-sudo sysctl -w net.ipv4.ip_forward=1
-
-# Deploy service
-sudo cp systemd/lobbyshift.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable lobbyshift
-sudo systemctl start lobbyshift
+# Run
+git clone https://github.com/Smokimcpot/LobbyShift.git && cd LobbyShift
+docker compose up -d
+docker compose logs lobbyshift | grep -i password   # generated admin password
 ```
 
-</details>
+The container uses the host network (it *is* the consoles' gateway) and only gets the
+`NET_ADMIN` and `NET_RAW` capabilities. Settings can be passed as `LOBBYSHIFT_*` environment
+variables in `docker-compose.yml`. LobbyShift detects Docker's `FORWARD DROP` policy and
+whitelists your LAN in the `DOCKER-USER` chain automatically.
+
+### Configuration
+
+Static settings live in `/etc/lobbyshift/config.yaml` (see
+[`packaging/config.yaml.example`](packaging/config.yaml.example)): LAN interface/subnet
+(auto-detected by default), routed ranges, web port. Everything else is set in the web UI.
 
 ### Clean Uninstall
 
 ```bash
 cd LobbyShift
-chmod +x uninstall.sh
-sudo ./uninstall.sh
+sudo ./uninstall.sh            # keeps your VPN configs and settings
+sudo ./uninstall.sh --purge    # removes everything
+# Docker: docker compose down -v
 ```
 
 ---
@@ -239,13 +253,36 @@ http://<SERVER-IP>:8080
   <img src="docs/images/webui.png" alt="LobbyShift Web Interface" width="800">
 </p>
 
+Log in with the admin password shown at install time (change it under **Settings**).
+
 ### 2. Upload VPN Configs
 
 1. Acquire WireGuard configs from VPN provider
 2. Access LobbyShift web interface
-3. Drag & drop `.conf` files to upload zone
+3. Drag & drop `.conf` files (or a `.zip` of them) to the upload zone
 4. System auto-configures split tunneling
-5. Click **🔄 Refresh Flags** if flags don't appear
+5. Click **Measure latency** to compare regions
+
+#### Proton VPN
+
+Download configs from **[account.proton.me → VPN → WireGuard](https://account.proton.me/u/0/vpn/WireGuard)**,
+one per server you want, with these options:
+
+| OPTION | VALUE | WHY |
+|--------|-------|-----|
+| Platform | Router | Plain config, no extras |
+| NetShield | Off | Only matchmaking uses the tunnel, it brings nothing |
+| **Moderate NAT** | **On** | Better NAT type on consoles |
+| VPN Accelerator | On | Lower latency |
+| Port forwarding | Off | Not needed |
+| Secure Core | Off | Adds a hop, more latency |
+
+LobbyShift reads the server name (`MX#12`, `CH-JP#3`...) and options embedded in each file:
+the country is exact (no GeoIP guess), Secure Core servers are tagged, and a warning appears
+if a config was generated with settings that hurt gaming (e.g. Moderate NAT off).
+
+> Proton's server list API is reserved for its official apps, so LobbyShift works from the
+> configs you download: that keeps your Proton credentials out of it.
 
 ### 3. Configure Console
 
@@ -285,78 +322,81 @@ http://<SERVER-IP>:8080
 3. **RESTART GAME** for changes to take effect
 4. Engage easier lobbies
 
+### 5. Optional Settings
+
+- **Devices**: list your consoles' IPs so only they use the VPN (default: the whole LAN).
+  Give them a DHCP reservation on your router so the IP never changes.
+- **Kill switch**: if the tunnel drops, block matchmaking instead of letting it go direct.
+- **Auto-reconnect**: the watchdog rebuilds a tunnel that stopped handshaking.
+- **Autostart**: deploy a region automatically at boot.
+
 ---
 
 ## ⌨️ CLI OPERATIONS
 
 ```bash
-# System status
-lobbyshift status
+sudo lobbyshift status            # tunnel state, health, traffic
+sudo lobbyshift list              # regions (* active, + favorite) with latency
+sudo lobbyshift connect mexico    # deploy region (alias: switch)
+sudo lobbyshift up                # reconnect last region
+sudo lobbyshift down              # disconnect
+sudo lobbyshift latency           # measure all regions
+sudo lobbyshift doctor            # check the host setup
+sudo lobbyshift passwd            # reset the admin password
 
-# List available regions
-lobbyshift list
-
-# Deploy region
-lobbyshift switch mexico
-
-# Start/Stop operations
-lobbyshift up
-lobbyshift down
-
-# Live intel feed
-lobbyshift logs
-
-# Restart service
-lobbyshift restart
+journalctl -u lobbyshift -f       # live logs
+# Docker: docker compose exec lobbyshift lobbyshift status
 ```
+
+`sudo` is needed to read the local API token in `/var/lib/lobbyshift`.
 
 ---
 
 ## 🔌 API ENDPOINTS
 
-### Core Operations
+All endpoints except `/api/health` and `/api/auth/*` require authentication: the session
+cookie set by `POST /api/auth/login`, or `Authorization: Bearer <token>` with the token stored
+in `/var/lib/lobbyshift/cli-token`. Cross-origin writes are refused.
+
+```bash
+TOKEN=$(sudo cat /var/lib/lobbyshift/cli-token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/status
+```
+
+### Tunnel
 
 | ENDPOINT | METHOD | OPERATION |
 |----------|--------|-----------|
-| `/api/status` | GET | System status |
-| `/api/configs` | GET | List all regions |
-| `/api/configs` | POST | Upload new region |
-| `/api/configs/{name}` | GET | Get config content |
-| `/api/configs/{name}` | PUT | Update config |
+| `/api/status` | GET | Tunnel state, health, traffic, LAN, problems |
+| `/api/tunnel/connect/{name}` | POST | Deploy region |
+| `/api/tunnel/up` | POST | Reconnect last region |
+| `/api/tunnel/down` | POST | Disconnect |
+| `/api/latency` | POST | Measure latency (`{"names": [...]}` or all) |
+
+### Regions
+
+| ENDPOINT | METHOD | OPERATION |
+|----------|--------|-----------|
+| `/api/configs` | GET | List regions |
+| `/api/configs` | POST | Upload `.conf` / `.zip` (multipart field `files`) |
+| `/api/configs/{name}` | GET | Region + config text (private key hidden) |
+| `/api/configs/{name}/text` | PUT | Replace config text (`[HIDDEN]` keeps the key) |
+| `/api/configs/{name}` | PATCH | `display_name`, `favorite` |
 | `/api/configs/{name}` | DELETE | Remove region |
-| `/api/switch/{name}` | POST | Deploy region |
-| `/api/up` | POST | Start VPN |
-| `/api/down` | POST | Stop VPN |
+| `/api/providers/proton` | GET | Proton setup help and stats |
 
-### Favorites
+### Settings & System
 
 | ENDPOINT | METHOD | OPERATION |
 |----------|--------|-----------|
-| `/api/favorites` | GET | List favorites |
-| `/api/favorites/{name}` | POST | Add to favorites |
-| `/api/favorites/{name}` | DELETE | Remove from favorites |
-
-### Logs
-
-| ENDPOINT | METHOD | OPERATION |
-|----------|--------|-----------|
-| `/api/logs` | GET | Operation history |
-| `/api/logs` | DELETE | Clear history |
-
-### Settings
-
-| ENDPOINT | METHOD | OPERATION |
-|----------|--------|-----------|
-| `/api/settings` | GET | Get all settings |
-| `/api/settings/autostart` | POST | Configure autostart |
-| `/api/settings/config-names` | GET | Get custom names |
-| `/api/settings/config-names` | POST | Save custom names |
-
-### Maintenance
-
-| ENDPOINT | METHOD | OPERATION |
-|----------|--------|-----------|
-| `/api/geoip-cache` | DELETE | Clear GeoIP cache (refresh flags) |
+| `/api/settings` | GET | Preferences, devices, routed ranges, LAN |
+| `/api/settings/prefs` | PUT | `autostart`, `autostart_config`, `kill_switch`, `auto_reconnect` |
+| `/api/settings/devices` | PUT | Consoles routed through the VPN |
+| `/api/auth/password` | PUT | Change admin password |
+| `/api/events` | GET / DELETE | Operation history |
+| `/api/system/doctor` | GET | Host checks |
+| `/api/system/geoip/update` | POST | Refresh the GeoIP database |
+| `/api/health` | GET | Liveness (public) |
 
 ---
 
@@ -379,14 +419,17 @@ lobbyshift restart
 <details>
 <summary><strong>▶ High latency issues?</strong></summary>
 
-**CHECK:** Verify `AllowedIPs` in WireGuard config is set to `185.34.0.0/16` and NOT `0.0.0.0/0`. LobbyShift auto-configures this on upload.
+**CHECK:** Only the matchmaking ranges go through the tunnel, whatever `AllowedIPs` your
+provider put in the config (LobbyShift ignores it). Use **Measure latency** to pick a closer
+server, and avoid Proton Secure Core servers (they add a hop).
 
 </details>
 
 <details>
 <summary><strong>▶ Multi-device support?</strong></summary>
 
-**AFFIRMATIVE.** Any device using LobbyShift as gateway will have CoD traffic routed through VPN.
+**AFFIRMATIVE.** By default, any device using LobbyShift as gateway has its CoD traffic routed
+through the VPN. Add devices under **Settings → Devices** to restrict it to specific consoles.
 
 </details>
 
@@ -400,7 +443,26 @@ lobbyshift restart
 <details>
 <summary><strong>▶ Flags not showing correctly?</strong></summary>
 
-Click the **🔄 Refresh Flags** button in the VPN Regions section. This clears the GeoIP cache and fetches fresh country data for all configs.
+Proton configs get their country from the server name. For other providers, the country comes
+from the offline DB-IP database, downloaded on first start: click **Update GeoIP database** in
+Settings → System check if the server had no internet access at that moment.
+
+</details>
+
+<details>
+<summary><strong>▶ Forgot the admin password?</strong></summary>
+
+`sudo lobbyshift passwd` (Docker: `docker compose exec lobbyshift lobbyshift passwd`).
+
+</details>
+
+<details>
+<summary><strong>▶ What changed in v2? Is it safe to upgrade?</strong></summary>
+
+v2 is a rewrite focused on security and reliability: login-protected UI, no root process,
+configs can no longer execute commands, nftables instead of iptables scripts, Docker image.
+Re-running `install.sh` migrates all your v1 data. The HTTP API changed (see above), so
+update any script that called the v1 endpoints.
 
 </details>
 
@@ -408,28 +470,45 @@ Click the **🔄 Refresh Flags** button in the VPN Regions section. This clears 
 
 ## 🛠️ TROUBLESHOOTING
 
+### First Step: Run the Doctor
+
+```bash
+sudo lobbyshift doctor     # or Settings → System check in the web UI
+```
+
+It checks LAN detection, IP forwarding, `ip`/`wg`/`nft`, the WireGuard module, the firewall
+table and the GeoIP database.
+
 ### No Internet After Gateway Configuration
 
 ```bash
 # Verify IP forwarding
 cat /proc/sys/net/ipv4/ip_forward  # Should output: 1
 
-# Check iptables rules
-sudo iptables -t nat -L -v -n
+# Check the gateway rules
+sudo nft list table inet lobbyshift
 ```
+
+**Docker installed on the gateway?** Docker sets the `FORWARD` policy to `DROP`. LobbyShift adds
+`ACCEPT` rules for your LAN to the `DOCKER-USER` chain automatically; check them with
+`sudo iptables -L DOCKER-USER -n`. A firewall such as `ufw` must also allow forwarding
+(`DEFAULT_FORWARD_POLICY="ACCEPT"` in `/etc/default/ufw`).
 
 ### VPN Connection Failure
 
 ```bash
-# WireGuard status
-sudo wg show
+# WireGuard status (look at "latest handshake")
+sudo wg show lobbyshift
 
-# Service status
-sudo systemctl status lobbyshift
+# Policy routing
+ip rule show | grep 51820
+ip route show table 51820
 
 # Live logs
 sudo journalctl -u lobbyshift -f
 ```
+
+No handshake usually means a revoked/expired key: download a fresh config from your provider.
 
 ### Web Interface Unavailable
 
@@ -496,24 +575,11 @@ sudo systemctl start nic-powersave-off
 
 ### Flags Not Showing (Globe Icon 🌍)
 
-```bash
-# Clear GeoIP cache via API
-curl -X DELETE http://localhost:8080/api/geoip-cache
-
-# Or click "🔄 Refresh Flags" button in web UI
-
-# Then restart service
-sudo systemctl restart lobbyshift
-```
-
-### High CPU Usage
+Settings → System check → **Update GeoIP database**, or:
 
 ```bash
-# Check if multiple WireGuard interfaces are running
-sudo wg show
-
-# Should only show ONE interface (lobbyshift)
-# If multiple, run clean uninstall and reinstall
+TOKEN=$(sudo cat /var/lib/lobbyshift/cli-token)
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/system/geoip/update
 ```
 
 ---
@@ -523,9 +589,11 @@ sudo wg show
 Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **AREAS OF INTEREST:**
-- 🐳 Docker containerization
-- 🌐 Additional VPN provider templates
+- 🌐 Additional VPN provider integrations
 - 🌍 Additional language localizations
+- 🧪 Testing on more hardware
+
+IP geolocation by [DB-IP](https://db-ip.com) (CC BY 4.0).
 
 ---
 
@@ -571,5 +639,5 @@ If this project provided value, consider leaving a ⭐
 </p>
 
 <p align="center">
-  <strong>▶ LOBBYSHIFT v1.1 ◀</strong>
+  <strong>▶ LOBBYSHIFT v2.0 ◀</strong>
 </p>

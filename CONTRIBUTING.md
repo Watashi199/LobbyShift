@@ -7,7 +7,8 @@ Thanks for your interest in contributing! 🎮
 ### Reporting Bugs
 
 - Check if the issue already exists
-- Include your OS version, Python version, and relevant logs
+- Include your OS, install method (native / Docker), and the output of `sudo lobbyshift doctor`
+- Add relevant logs: `journalctl -u lobbyshift -e` or `docker compose logs lobbyshift`
 - Describe steps to reproduce
 
 ### Suggesting Features
@@ -19,49 +20,68 @@ Thanks for your interest in contributing! 🎮
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Test locally
+3. Make your changes, with tests
+4. Run `ruff check src tests scripts` and `pytest`
 5. Commit with clear messages
-6. Push and create a PR
+6. Push and create a PR (CI runs lint, tests on Python 3.11–3.13, shellcheck and a Docker build)
 
 ## Development Setup
 
+Development works on any OS, including Windows and macOS: a fake network
+stack replaces `ip`/`wg`/`nft`, so nothing touches your machine.
+
 ```bash
-# Clone your fork
 git clone https://github.com/Smokimcpot/LobbyShift.git
 cd LobbyShift
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run locally (requires root for WireGuard)
-sudo python -m lobbyshift.main
+pytest                             # full test suite
+python scripts/devserver.py        # UI on http://127.0.0.1:8080, password "devpassword"
 ```
+
+## Project Layout
+
+```
+src/lobbyshift/
+├── app.py              FastAPI factory, security middleware (CSP, Origin check)
+├── api/routes.py       HTTP endpoints
+├── service.py          Orchestrator: connect/disconnect, watchdog, migration from v1
+├── core/
+│   ├── wgconfig.py     WireGuard config parser (allowlist: PostUp & co. are dropped)
+│   ├── tunnel.py       ip link / wg setconf / policy routing (no wg-quick)
+│   ├── firewall.py     nftables ruleset (atomic), Docker FORWARD compatibility
+│   ├── geoip.py        Offline DB-IP country database
+│   └── health.py       Latency probes
+├── providers/proton.py Proton VPN config metadata and advice
+├── store.py            SQLite persistence
+├── auth.py             Password, sessions, CLI token
+├── cli.py              `lobbyshift` command
+└── web/                UI (static ES modules, no build step)
+tests/                  pytest suite + FakeRunner
+packaging/              systemd unit, example config
+```
+
+## Design Rules
+
+- **Never execute user-provided content.** WireGuard configs go through
+  `core/wgconfig.parse`, which keeps an allowlist of keys.
+- **No root.** The service runs with `CAP_NET_ADMIN` + `CAP_NET_RAW` only.
+- **Every system command goes through `Runner`** so it can be faked in tests.
+- **The UI never injects data as HTML.** It must work under the strict CSP set in `app.py`.
 
 ## Code Style
 
-- Follow PEP 8
-- Use type hints
-- Add docstrings to functions
+- `ruff` (config in `pyproject.toml`)
+- Type hints and docstrings for non-obvious behavior
 - Keep functions small and focused
-
-## Testing
-
-```bash
-# Run tests (coming soon)
-pytest
-```
 
 ## Areas We Need Help
 
-- 🌍 More VPN provider templates
-- 🐳 Docker support
-- 📱 Mobile-friendly UI improvements
-- 📝 Documentation and translations
+- 🌐 More VPN provider integrations (`src/lobbyshift/providers/`)
+- 🌍 Translations
+- 🧪 Testing on more hardware (Pi 3, Pi 5, x86 mini PCs)
 
 ## Code of Conduct
 
