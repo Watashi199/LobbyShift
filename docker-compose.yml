@@ -1,0 +1,36 @@
+# LobbyShift with Docker
+#
+# Host prerequisites (once):
+#   echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-lobbyshift.conf && sudo sysctl --system
+#   echo wireguard | sudo tee /etc/modules-load.d/lobbyshift.conf && sudo modprobe wireguard
+#
+# Then:  docker compose up -d && docker compose logs lobbyshift | grep -i password
+
+services:
+  lobbyshift:
+    image: ghcr.io/watashi199/lobbyshift:2
+    build: .
+    container_name: lobbyshift
+    # Must share the host network: consoles use this machine as their gateway.
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - lobbyshift-data:/var/lib/lobbyshift
+      # Optional static config (LAN interface, routed ranges...). Create the
+      # file first, otherwise Docker creates a directory in its place.
+      # - ./config.yaml:/etc/lobbyshift/config.yaml:ro
+    environment:
+      LOBBYSHIFT_WEB_PORT: "8080"
+      # Seeds the admin password on first start (otherwise one is generated
+      # and printed in the logs). Change it later from the UI.
+      # LOBBYSHIFT_ADMIN_PASSWORD: "change-me-please"
+      # LOBBYSHIFT_LAN_INTERFACE: "eth0"
+      # LOBBYSHIFT_ROUTED_RANGES: "185.34.0.0/16"
+    restart: unless-stopped
+
+volumes:
+  lobbyshift-data:
