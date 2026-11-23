@@ -148,7 +148,8 @@ LobbyShift is a **self-hosted tactical VPN gateway** designed to intercept and r
 - Minimum 1GB RAM
 
 **SOFTWARE:**
-- Native install: Debian 12+ / Ubuntu 22.04+ / Raspberry Pi OS Bookworm (Python 3.11+)
+- Native install: Debian 13 Trixie (recommended) or 12 Bookworm / Ubuntu 22.04+ /
+  Raspberry Pi OS Trixie or Bookworm (Python 3.11+)
 - Or any Linux with Docker (amd64, arm64, armv7)
 - Kernel with WireGuard (5.6+, standard on all of the above)
 - WireGuard-compatible VPN subscription
